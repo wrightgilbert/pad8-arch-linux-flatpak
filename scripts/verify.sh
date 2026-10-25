@@ -14,9 +14,19 @@ case $(uname -r) in
 esac
 
 echo "内核配置："
-for opt in CONFIG_SYSVIPC CONFIG_IPC_NS CONFIG_PID_NS CONFIG_USER_NS; do
-    if zcat /proc/config.gz 2>/dev/null | grep -qx "$opt=y"; then ok "$opt=y"; else bad "$opt 未开启"; fi
-done
+# 注意别写成 `zcat /proc/config.gz | grep -qx`：grep -q 提前退出会让 zcat 吃到
+# SIGPIPE，配合 set -o pipefail 整个管道就变成非零，看起来像"选项没开"。
+cfg=$(zcat /proc/config.gz 2>/dev/null || cat "/boot/config-$(uname -r)" 2>/dev/null || true)
+if [ -z "$cfg" ]; then
+    bad "读不到内核配置（既没有 /proc/config.gz 也没有 /boot/config-*）"
+else
+    for opt in CONFIG_SYSVIPC CONFIG_IPC_NS CONFIG_PID_NS CONFIG_USER_NS; do
+        case $cfg in
+            *"$opt=y"*) ok "$opt=y" ;;
+            *) bad "$opt 未开启" ;;
+        esac
+    done
+fi
 
 echo "命名空间："
 if unshare -U true 2>/dev/null; then ok "user namespace 可用"; else bad "user namespace 不可用"; fi

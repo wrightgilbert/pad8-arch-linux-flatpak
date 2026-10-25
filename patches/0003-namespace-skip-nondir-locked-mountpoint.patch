@@ -1,0 +1,40 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pad8-arch-flatpak <noreply@example.com>
+Date: Sun, 25 Oct 2026 12:00:00 +0000
+Subject: [PATCH 3/3] namespace: do not treat a non-directory locked mountpoint
+ as revealing
+
+mount_too_revealing() refuses to mount a filesystem inside a user namespace
+when the same filesystem is already visible in the parent namespace with
+locked submounts that might hide content. The check walks the mounts of the
+same filesystem and, for every MNT_LOCKED child, asks "is this directory
+permanently empty?" via is_empty_dir_inode(). For a child whose mountpoint is a
+regular file that test can never be true, so the whole filesystem is reported as
+revealing and the mount fails with EPERM:
+
+    bwrap: Can't mount proc on /proc: Operation not permitted
+
+This port's /proc/cpuinfo is a bind mount of a regular file (the port rewrites
+/proc/cpuinfo to hide SVE from llvmpipe), which trips exactly that path and makes
+every Flatpak/bubblewrap sandbox unusable. A non-directory mountpoint cannot
+hide directory content, so skip the emptiness test for it.
+
+Signed-off-by: pad8-arch-flatpak <noreply@example.com>
+---
+ fs/namespace.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/fs/namespace.c b/fs/namespace.c
+--- a/fs/namespace.c
++++ b/fs/namespace.c
+@@ -4928,7 +4928,7 @@ static bool mnt_already_visible(struct mnt_namespace *ns,
+ 			if (!(child->mnt.mnt_flags & MNT_LOCKED))
+ 				continue;
+ 			/* Is the directory permanetly empty? */
+-			if (!is_empty_dir_inode(inode))
++			if (d_is_dir(child->mnt_mountpoint) && !is_empty_dir_inode(inode))
+ 				goto next;
+ 		}
+ 		/* Preserve the locked attributes */
+-- 
+2.43.0

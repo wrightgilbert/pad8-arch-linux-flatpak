@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: pad8-arch-flatpak <noreply@example.com>
+Date: Sun, 25 Oct 2026 12:00:00 +0000
+Subject: [PATCH 1/3] sched: place SYSVIPC task_struct members in Android ABI
+ padding
+
+Enabling CONFIG_SYSVIPC in a GKI kernel inserts struct sysv_sem / struct
+sysv_shm into struct task_struct, which shifts every following member and
+changes the CRC of every symbol whose type touches task_struct. All vendor
+modules shipped in /vendor_dlkm then refuse to load (module_layout mismatch).
+
+Android reserves ABI padding slots at the end of struct task_struct for
+exactly this kind of vendor extension. Move the SYSVIPC members into
+ANDROID_KABI_RESERVE(6..8) so the layout is byte-identical whether SYSVIPC
+is enabled or not.
+
+Patch layout follows Droidspaces-OSS
+(Documentation/resources/kernel-patches/GKI/below-kernel-6.12/).
+
+Signed-off-by: pad8-arch-flatpak <noreply@example.com>
+---
+ include/linux/sched.h | 10 ++++++++--
+ 1 file changed, 9 insertions(+), 5 deletions(-)
+
+diff --git a/include/linux/sched.h b/include/linux/sched.h
+--- a/include/linux/sched.h
++++ b/include/linux/sched.h
+@@ -1073,8 +1073,8 @@ struct task_struct {
+ 	struct nameidata		*nameidata;
+ 
+ #ifdef CONFIG_SYSVIPC
+-	struct sysv_sem			sysvsem;
+-	struct sysv_shm			sysvshm;
++	// struct sysv_sem			sysvsem;
++	// struct sysv_shm			sysvshm;
+ #endif
+ #ifdef CONFIG_DETECT_HUNG_TASK
+ 	unsigned long			last_switch_count;
+@@ -1524,9 +1524,15 @@ struct task_struct {
+ 	ANDROID_KABI_RESERVE(3);
+ 	ANDROID_KABI_RESERVE(4);
+ 	ANDROID_KABI_RESERVE(5);
++
++#ifdef CONFIG_SYSVIPC
++	ANDROID_KABI_USE(6, struct sysv_sem sysvsem);
++	_ANDROID_KABI_REPLACE(ANDROID_KABI_RESERVE(7); ANDROID_KABI_RESERVE(8), struct sysv_shm sysvshm);
++#else
+ 	ANDROID_KABI_RESERVE(6);
+ 	ANDROID_KABI_RESERVE(7);
+ 	ANDROID_KABI_RESERVE(8);
++#endif
+ 
+ #ifdef CONFIG_RV
+ 	/*
+-- 
+2.43.0

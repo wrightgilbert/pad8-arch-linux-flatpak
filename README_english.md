@@ -2,40 +2,51 @@
 
 # Flatpak kernel patches for Arch Linux on Xiaomi Pad 8 (yupei)
 
-Adds the kernel features **Flatpak / bubblewrap** needs on top of the [arch-xiaomi-pad8](https://github.com/KoryoSony/arch-xiaomi-pad8) port, and ships a ready-to-flash `boot.img` plus post-install scripts.
+Adds what Flatpak needs on top of the [arch-xiaomi-pad8](https://github.com/KoryoSony/arch-xiaomi-pad8) port, plus a ready-to-flash `boot.img`.
 
-**Quick start:** grab `boot.img` from [Releases](../../releases) → `fastboot flash boot boot.img` → boot → `bash scripts/post-install.sh` → `flatpak install flathub org.gnome.Calculator`.
+## Quick start
 
-## What is inside
+Requires: Arch Linux already installed from the upstream `v0.1.0-alpha` assets, base firmware **HyperOS 4.0.5.0.XPZCNXM**, unlocked bootloader.
 
-- **Three kernel patches**: stop `CONFIG_SYSVIPC` from breaking the module ABI, tolerate vendor symbol CRCs that a local rebuild cannot reproduce, and let a user namespace mount `procfs` when `/proc/cpuinfo` is a file bind mount.
-- **Prebuilt `boot.img`**: kernel `6.6.118-4k-arch+` with `SYSVIPC`, `IPC_NS`, `PID_NS`, `USER_NS` and all three patches.
-- **Post-install tooling**: `scripts/post-install.sh` (drop the setuid bit on bwrap, add Flathub) and `scripts/verify.sh` (nine-point self check).
-- **Reproducible**: `scripts/build-kernel.sh` rebuilds the kernel on any aarch64 host; `scripts/mkboot.py` swaps the kernel into a stock `boot.img`.
+```bash
+adb reboot bootloader
+fastboot flash boot boot.img        # from Releases
+fastboot reboot
+```
 
-## The three patches
+After booting:
 
-| Patch | Problem it fixes | Symptom without it |
-|---|---|---|
-| `0001` sched | Enabling `CONFIG_SYSVIPC` inserts members into `struct task_struct`, shifting every following field; 950+ stock modules then fail their CRC check | Kernel boots, no driver loads, stuck on boot logo |
-| `0002` module | A locally rebuilt kernel produces `module_layout` CRC `0x6500052f` while the vendor modules advertise `0x4e276f37`, even with an identical config and compiler | `module_layout: disagrees about version`, every module rejected |
-| `0003` namespace | The port rewrites `/proc/cpuinfo` as a **file** bind mount; `mount_too_revealing()` then treats procfs as unsafe to mount inside a user namespace | `bwrap: Can't mount proc on /proc: Operation not permitted` |
+```bash
+git clone https://github.com/wrightgilbert/pad8-arch-linux-flatpak
+bash pad8-arch-linux-flatpak/scripts/post-install.sh
+flatpak install --user flathub org.gnome.Calculator
+flatpak run org.gnome.Calculator
+```
 
-## Requirements
+`post-install.sh` clears the setuid bit on `/usr/bin/bwrap`, adds the Flathub remote and runs `scripts/verify.sh`.
 
-- Xiaomi Pad 8 (`yupei`, SM8735), unlocked bootloader, data wipe.
-- Base firmware **HyperOS 4.0.5.0.XPZCNXM** (hard requirement of the upstream port; the OEM vendor modules in `/vendor` are built from the 6.6.57 vendor tree and must match the base).
-- Upstream port `v0.1.0-alpha`; only the kernel image is replaced by this project.
+## What the patches do
+
+1. **`0001` sched** — moves the `CONFIG_SYSVIPC` members of `task_struct` into the Android ABI padding slots, so enabling SYSVIPC no longer shifts the struct and the stock vendor modules can load.
+2. **`0002` module** — relaxes the module symbol CRC check. A locally rebuilt kernel does not reproduce the vendor CRCs even with an identical config and compiler, so without this no module loads at all.
+3. **`0003` namespace** — the port bind-mounts `/proc/cpuinfo` as a regular file; the kernel's mount-safety check then refuses to mount procfs inside a sandbox. The patch skips that check for non-directory mountpoints.
+
+The kernel also enables `CONFIG_SYSVIPC`, `CONFIG_IPC_NS`, `CONFIG_PID_NS` and `CONFIG_USER_NS`, required by Flatpak's `--unshare-ipc` and by bubblewrap.
+
+## Caveats
+
+- Only `boot.img` is replaced. Keep `init_boot.img` and `userdata.part1..6.img` from the upstream release, and do not mix base firmware versions.
+- Patch `0002` is a workaround, not a fix: it turns off the ABI guard, so after changing base firmware stale modules still load and problems show up without a CRC error.
+- Do not flash this kernel on a device whose base firmware is not 4.0.5.
 
 ## Docs
 
-- [Quick start](docs/zh/快速开始.md) (Chinese)
-- [Kernel changes explained](docs/zh/内核改动.md) (Chinese)
+- [Quick start and troubleshooting](docs/zh/快速开始.md) (Chinese)
+- [What each patch fixes](docs/zh/内核改动.md) (Chinese)
 - [Building it yourself](docs/zh/构建与复现.md) (Chinese)
-- [Debugging log](docs/zh/调试过程.md) (Chinese)
 
 ## Credits
 
-- [arch-xiaomi-pad8](https://github.com/KoryoSony/arch-xiaomi-pad8) — the port this builds on.
-- [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS) — the Android ABI padding approach for `SYSVIPC`.
-- [bubblewrap](https://github.com/containers/bubblewrap), [Flatpak](https://flathub.org), Android common kernel `android15-6.6`, LLVM 18.1.8.
+- [arch-xiaomi-pad8](https://github.com/KoryoSony/arch-xiaomi-pad8) — the port.
+- [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS) — the Android ABI padding approach used by `0001`.
+- [Flatpak](https://flatpak.org/) / [bubblewrap](https://github.com/containers/bubblewrap) — the sandbox.

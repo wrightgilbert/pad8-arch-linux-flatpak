@@ -2,59 +2,63 @@
 
 # 小米平板 8（yupei）Arch Linux Flatpak 内核补丁
 
-在 [arch-xiaomi-pad8](https://github.com/KoryoSony/arch-xiaomi-pad8) 这套移植的基础上，补上 **Flatpak / bubblewrap 沙箱** 需要的内核能力，并给出可直接刷入的 `boot.img` 与装机脚本。
+在 [arch-xiaomi-pad8](https://github.com/KoryoSony/arch-xiaomi-pad8) 的移植上补齐 Flatpak 需要的内核能力，并给出可直接刷入的 `boot.img`。
 
-![状态](https://img.shields.io/badge/Flatpak-可用-brightgreen) ![内核](https://img.shields.io/badge/kernel-6.6.118--4k--arch%2B-blue) ![底包](https://img.shields.io/badge/OS-4.0.5.0.XPZCNXM-orange)
+## 快速开始
 
-**快速开始：** 从 [Releases](../../releases) 下载 `boot.img` → `fastboot flash boot boot.img` → 开机后 `bash scripts/post-install.sh` → `flatpak install flathub org.gnome.Calculator` 验证。
+前提：已按上游 `v0.1.0-alpha` 装好 Arch Linux，底包为澎湃 OS **4.0.5.0.XPZCNXM**，bootloader 已解锁。
 
-## 项目内容
+```bash
+# 1. 刷内核
+adb reboot bootloader
+fastboot flash boot boot.img        # 从 Releases 下载
+fastboot reboot
 
-- **三个内核补丁**：修好 `CONFIG_SYSVIPC` 破坏模块 ABI、以及 `/proc/cpuinfo` 伪装让沙箱挂 `/proc` 失败这两件事。
-- **预编译 `boot.img`**：`6.6.118-4k-arch+`，内建 `SYSVIPC`、`IPC_NS`、`PID_NS`、`USER_NS`，开箱即带上述补丁。
-- **装机脚本**：`scripts/post-install.sh` 去 setuid、加 Flathub 源；`scripts/verify.sh` 一条命令自检九项。
-- **可复现**：`scripts/build-kernel.sh` 在任意 aarch64 主机上重编内核，`scripts/mkboot.py` 换内核进 `boot.img`。
+# 2. 开机后跑一次装机脚本
+git clone https://github.com/wrightgilbert/pad8-arch-linux-flatpak
+bash pad8-arch-linux-flatpak/scripts/post-install.sh
 
-## 这次改了什么
+# 3. 验证
+flatpak install --user flathub org.gnome.Calculator
+flatpak run org.gnome.Calculator
+```
 
-| 补丁 | 解决 | 不加会怎样 |
-|---|---|---|
-| `0001` sched：把 SYSVIPC 的成员放进 Android ABI padding | 开 `CONFIG_SYSVIPC` 会让 `struct task_struct` 整体位移，`/vendor` 的 950+ 个模块 CRC 全对不上 | 内核起来但一个驱动都载不进来，屏幕定在开机 Logo，USB/网络全无 |
-| `0002` module：放宽符号 CRC 比对 | 同一份配置、同一个 clang 版本，重编出来的 `module_layout` CRC（`0x6500052f`）仍与厂商模块（`0x4e276f37`）不同 | 同上：`module_layout: disagrees about version`，模块全部拒绝加载 |
-| `0003` namespace：文件型挂载点不算“会泄漏” | 移植包为了骗过 llvmpipe，把 `/proc/cpuinfo` 做成了**文件**型 bind mount，`mount_too_revealing()` 因此判定整个 procfs 挂载不安全 | `bwrap: Can't mount proc on /proc: Operation not permitted`，Flatpak 一个应用都起不来 |
+`post-install.sh` 做三件事：去掉 `/usr/bin/bwrap` 的 setuid 位、添加 Flathub 源、跑 `verify.sh` 自检。
 
-详细原理、实测数字与排查过程见 [内核改动说明](docs/zh/内核改动.md) 与 [调试过程](docs/zh/调试过程.md)。
+## 改了什么
 
-## 功能现状
+三个内核补丁，每个都对应一条"不加就用不了"的限制：
 
-| 功能 | 状态 | 说明 |
-|---|---|---|
-| Flatpak 安装/运行 | 可用 | 实测 `org.gnome.Calculator 51.1` + `org.gnome.Platform 51` + Mesa 26.2.5，沙箱内 `/app` 可读 |
-| bubblewrap 沙箱 | 可用 | `--unshare-all --proc /proc` 通过 |
-| SYSVIPC / IPC namespace | 可用 | `/proc/sysvipc` 存在，`unshare -U`/`-p`/`-i` 正常 |
-| 厂商模块（显示/GPU/WiFi/蓝牙…） | 可用 | 559 个模块载入，`dmesg` 无 CRC 冲突 |
-| Waydroid | 未测试 | 依赖 binder，与本次改动无关 |
-| 内核模块签名强制 | 未启用 | 使用方需自行评估 |
+1. **`0001` sched**：把 `CONFIG_SYSVIPC` 的 `task_struct` 成员放进 Android ABI 预留位，打开 SYSVIPC 不再改变内核结构体布局，厂商模块才能载入。
+2. **`0002` module**：放宽模块符号 CRC 比对。同一份配置、同一个编译器，本地重编内核的 CRC 仍与厂商模块不一致，不放宽就一个模块都加载不了。
+3. **`0003` namespace**：移植包把 `/proc/cpuinfo` 做成了文件型 bind mount，内核的挂载安全检查会因此拒绝在沙箱里挂 procfs；补丁让"非目录挂载点"跳过这项检查。
 
-## 支持的设备与前提
+同时内核里开了 `CONFIG_SYSVIPC`、`CONFIG_IPC_NS`、`CONFIG_PID_NS`、`CONFIG_USER_NS`（Flatpak 的 `--unshare-ipc` 与 bubblewrap 沙箱都依赖它们）。
 
-- 机型：小米平板 8（`yupei`，SM8735 / Adreno 825）。
-- 底包：**澎湃 OS 4.0.5.0.XPZCNXM**（上游移植的硬性前提；`/vendor` 里的模块是 OEM 6.6.57 供应商树编的，必须与底包配对）。
-- 已解锁 bootloader（`fastboot getvar unlocked` = `yes`），会清空 userdata。
-- 上游 port 版本：`v0.1.0-alpha`（`userdata.part1..6.img` 从上游 release 取，本项目只替换内核）。
-- 已知限制：键盘保护套、手写笔等外设在部分批次上仍需上游后续版本支持，与本次改动无关。
+## 文件
+
+| 文件 | 用途 |
+|---|---|
+| `patches/0001..0003.patch` | 可直接 `git apply` 的内核补丁 |
+| `scripts/build-kernel.sh` | 在任意 aarch64 主机上重编内核 |
+| `scripts/mkboot.py` | 把新编的 `Image` 换进上游 `boot.img` |
+| `scripts/post-install.sh` | 装机后一次性的权限与源配置 |
+| `scripts/verify.sh` | 十项自检 |
+
+## 注意
+
+- 只替换 `boot.img`。`init_boot.img` 与 `userdata.part1..6.img` 用上游 release 的原件，不要与别的底包混用。
+- 补丁 `0002` 是权宜之计：它关闭了"内核与模块 ABI 是否匹配"的校验，换底包后旧模块仍会被加载，出问题不会有 CRC 报错提示。
+- 底包不是 4.0.5 的机器不要刷，`/vendor` 里的模块与这个内核不匹配。
 
 ## 文档
 
-- [快速开始（刷机 + 验证）](docs/zh/快速开始.md)
-- [内核改动说明](docs/zh/内核改动.md)
-- [自己编译（arm64 主机）](docs/zh/构建与复现.md)
-- [调试过程：从「模块加载失败」到「沙箱挂载被拒」](docs/zh/调试过程.md)
-- [English README](README_english.md)
+- [快速开始与排错](docs/zh/快速开始.md)
+- [三个补丁分别在修什么](docs/zh/内核改动.md)
+- [自己编译](docs/zh/构建与复现.md)
 
 ## 致谢
 
-- [arch-xiaomi-pad8](https://github.com/KoryoSony/arch-xiaomi-pad8)：整套移植（内核树、rootfs、installer、固件挂载）。
-- [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS)：`SYSVIPC` 的 Android ABI padding 补丁方案即出自其 `Documentation/resources/kernel-patches/`，本项目的 `0001` 沿用其做法。
-- [bubblewrap](https://github.com/containers/bubblewrap) / [Flatpak](https://flatpak.org/)：沙箱与运行时。
-- Android 通用内核（`kernel/common` `android15-6.6`）与 LLVM 18.1.8。
+- [arch-xiaomi-pad8](https://github.com/KoryoSony/arch-xiaomi-pad8)：整套移植。
+- [Droidspaces-OSS](https://github.com/ravindu644/Droidspaces-OSS)：`0001` 的 Android ABI padding 做法出自其内核补丁目录。
+- [Flatpak](https://flatpak.org/) / [bubblewrap](https://github.com/containers/bubblewrap)：沙箱。

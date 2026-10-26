@@ -44,6 +44,7 @@ The kernel also enables `CONFIG_SYSVIPC`, `CONFIG_IPC_NS`, `CONFIG_PID_NS` and `
 - [Quick start and troubleshooting](docs/zh/快速开始.md) (Chinese)
 - [What each patch fixes](docs/zh/内核改动.md) (Chinese)
 - [Building it yourself](docs/zh/构建与复现.md) (Chinese)
+- [GPU / Mesa: KGSL WSI patch](docs/zh/GPU与Mesa.md) (Chinese)
 
 ## Credits
 

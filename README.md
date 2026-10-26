@@ -44,6 +44,7 @@ flatpak run org.gnome.Calculator
 | `scripts/mkboot.py` | 把新编的 `Image` 换进上游 `boot.img` |
 | `scripts/post-install.sh` | 装机后一次性的权限与源配置 |
 | `scripts/verify.sh` | 十项自检 |
+| `mesa/build-mesa-wsi.sh` | 重编带 KGSL WSI 的 Turnip（可选，见 GPU 文档） |
 
 ## 注意
 
@@ -56,6 +57,7 @@ flatpak run org.gnome.Calculator
 - [快速开始与排错](docs/zh/快速开始.md)
 - [三个补丁分别在修什么](docs/zh/内核改动.md)
 - [自己编译](docs/zh/构建与复现.md)
+- [GPU / Mesa：KGSL WSI 补丁](docs/zh/GPU与Mesa.md)
 
 ## 致谢
 

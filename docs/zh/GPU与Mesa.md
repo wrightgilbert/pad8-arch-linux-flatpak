@@ -67,17 +67,8 @@ vulkaninfo 2>/dev/null | grep -E 'physical_device_drm|calibrated_timestamps'
 
 固化了这条之后，`KWIN_NO_TIMER_QUERY=1` 就不需要了（我们是先移除它、再重启两次会话确认 KWin 不再 TRAP）。
 
-## 仍然不行的
+## 暂未解决
 
-- `gamescope`：错误从 `I can't KHR_display` 变为 `drmGetDeviceFromDevId() failed`。它需要真正的 DRM 节点或 `VK_KHR_display`，本机 GPU 没有，这条与 Turnip 无关。
-- Steam 客户端 UI：仍走 llvmpipe（它自己的 GL 断言，见仓库 README 的 Steam 一节）。
+- `gamescope`：装上本补丁后错误从 `I can't KHR_display` 变为 `drmGetDeviceFromDevId() failed`，随后 `SDL_Vulkan_CreateSurface failed: VK_KHR_wayland_surface extension is not enabled`。进一步原因没有查清，**暂未解决**（也试过 3.16.1 源码编译，卡在缺 submodule）。
+- Steam 客户端 UI：仍走 llvmpipe。换到 zink / freedreno 出图时会反复生成 `assert_*.dmp`、`steamwebhelper` 被反复拉起，根因没有定位，**暂未解决**。
 
-## 其他骁龙项目怎么做的（2026-10-26 调研）
-
-| 项目 | 做法 | 会不会遇到本机的问题 |
-|---|---|---|
-| **Armada**（`armada-os/armada`，约 2.0k★，"SteamOS-like Linux for ARM handhelds"） | Fedora bootc + ROCKNIX 派生设备支持；**主线内核 7.2.6**，`CONFIG_DRM_MSM=y`（内置，注释写明"作为模块加载太晚，赶不上 bootloader 的 live 显示"）+ 每机型 DTS；gamescope 打的是 DRM 侧补丁（合成 EDID、DRM lease、panel quirks）。支持 SM8250/8550/8650/8750（AYN Odin 2/3、AYANEO Pocket 系列等） | **不会** —— GPU 本身就是 DRM 设备（`drm/msm`），压根没有 kgsl |
-| **DroidDeck**（`Droid-Deck/*`） | Android 上跑容器；GPU 走 kgsl；给 Turnip 打 kgsl WSI 补丁、自编 gamescope 3.16.29（nested wayland） | **会**，思路与本仓一致（本仓 WSI 补丁即照它的 `linux_kgsl_wsi.py` 实现） |
-| **VDRM**（`zzz-sleep0/VDRM`） | 内核模块造虚拟显示器 `/dev/vdrm` + 虚拟 card1 给容器合成器 | 无关：它解决"没有显示输出"，本机显示是现成的 msm `card0` |
-
-结论：**跑得动 SteamOS 的骁龙掌机都换成了主线 `drm/msm`**（内核与 DTS 由项目自己维护），不是在 kgsl 上做适配；留在 kgsl 上的（DroidDeck 一类）也都绕开 gamescope 的 DRM 后端。上游没有"把 kgsl 暴露成 DRM 节点"的项目（GitHub 搜索无结果），所以本机想走 gamescope 直出只有一条路：换主线内核 + 写 yupei 的 DTS —— 代价是放弃澎湃/AOSP 侧的设备支持（modem、相机、触控等），不划算。
